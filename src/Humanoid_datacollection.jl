@@ -38,38 +38,83 @@ end
 
 function humanoid_cost(qpos, qvel, ctrl, t)
     cost = 0.0
-    root_pos = qpos[1:3]
-    target_pos = Position
 
-    torso_quat = qpos[4:7]
-    root_lin_vel = qvel[1:2]
-    target_vel = [0.5, 0.0]
+    # Extract torso position and orientation
+    root_pos = qpos[1:3]  # x, y, z position
+    target_pos = Position # position of the target
 
+    torso_quat = qpos[4:7] # quaternion orientation
+
+    # Desired forward velocity (x-direction)
+    root_lin_vel = qvel[1:2] # only xy
+    target_vel = [0.4, 0.0]  # only xy
+
+    # Weights (can tune these)
+    # Penalize torso rotation (try to keep it upright)
+    # Convert quaternion to roll and pitch
     roll = atan(2(torso_quat[1] * torso_quat[2] + torso_quat[3] * torso_quat[4]),
-                1 - 2(torso_quat[2]^2 + torso_quat[3]^2))
+        1 - 2(torso_quat[2]^2 + torso_quat[3]^2))
     pitch = asin(2(torso_quat[1] * torso_quat[3] - torso_quat[4] * torso_quat[2]))
-    cost += 5.0 * (roll^2 + pitch^2)
-    cost += 12.0 * norm(root_pos[1:2] - target_pos[1:2])
-    cost += 2.25 * (1.28 - root_pos[3])
+    cost += 5.0 * (roll^2 + pitch^2)  # Keep upright and restrict pitch rotation further
+
+    # Restric Yaw rotation
+    yaw = atan(2(torso_quat[1] * torso_quat[4] + torso_quat[2] * torso_quat[3]),
+           1 - 2(torso_quat[3]^2 + torso_quat[4]^2))
+    cost += 0.1 * yaw^2  # Penalize deviation from facing forward
+
+    # Penalize distance from goal (xy)
+    cost += 12.5 * norm(root_pos[1:2] - target_pos[1:2])
+
+    # Penalize torso height
+    target_height = 1.28 #1.282 = initial_qpos_root_z
+    cost += 3.0 * (target_height - root_pos[3])  # softly keep torso up
+
+    # Penalize torso velocity difference
     cost += 1.0 * norm(root_lin_vel - target_vel)
 
-    step_period = 100
-    phase = t % step_period
-    foot_swing, foot_stance = phase < step_period ÷ 2 ? ("foot_left", "foot_right") : ("foot_right", "foot_left")
+    # Get body IDs
+    id_left = MuJoCo.body(model, "shin_left").id
+    id_right = MuJoCo.body(model, "shin_right").id
+
+    vx_left = get_body_vx(data, id_left)
+    vx_right = get_body_vx(data, id_right)
+
+    if vx_left > vx_right
+        foot_swing = "foot_left"
+        foot_stance = "foot_right"
+        knee_swing = id_left
+    else
+        foot_swing = "foot_right"
+        foot_stance = "foot_left"
+        knee_swing = id_right
+    end
 
     swing_id = MuJoCo.body(model, foot_swing).id
     stance_id = MuJoCo.body(model, foot_stance).id
-    swing_pos = data.xpos[swing_id + 1, 1]
-    foot_target = root_pos[1] + 0.5
-    cost += 10.0 * (swing_pos - foot_target)^2
 
-    stance_pos_z = data.xpos[stance_id + 1, 3]
-    swing_pos_z = data.xpos[swing_id + 1, 3]
-    cost += 0.01 * (stance_pos_z - swing_pos_z)
+    swing_foot = data.xpos[swing_id + 1, 1] # position of foot's current x
+    foot_targetx = root_pos[1] + 0.5  # 30cm ahead of torso
+    cost += 7.5 * (swing_foot - foot_targetx)^2
 
-    stance_pos_y = data.xpos[stance_id + 1, 2]
-    swing_pos_y = data.xpos[swing_id + 1, 2]
-    cost += 0.1 * norm(stance_pos_y - swing_pos_y)
+    swing_knee = data.xpos[knee_swing + 1, 1] # position of knee's current 3
+    cost += 3.5 * (swing_knee - foot_targetx)^2
+
+    swing_foot_z = data.xpos[swing_id + 1, 3] # position of swing foot's current z
+    knee_targetz = root_pos[3] - 0.4  # below 40cm of torso
+    #cost += 2.0 * (swing_knee - knee_targetz)^2
+    
+    stance_foot_z = data.xpos[stance_id + 1, 3] # position of stance foot's current z
+    foot_clearance = swing_foot_z - stance_foot_z
+    if foot_clearance < 0
+        cost -= 0.01 * foot_clearance
+    end
+
+    left_foot_y = data.xpos[MuJoCo.body(model, "foot_left").id + 1, 2] # position of left foot's current y
+    right_foot_y = data.xpos[MuJoCo.body(model, "foot_right").id + 1, 2] # position of right foot's current y
+    leg_clearance = left_foot_y - right_foot_y
+    if leg_clearance < 0
+        cost -= 1.0 * leg_clearance
+    end
 
     cost += 0.01 * sum(ctrl .^ 2)
 
