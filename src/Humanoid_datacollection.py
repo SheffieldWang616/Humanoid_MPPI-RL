@@ -312,78 +312,6 @@ def save_logs():
     print(f"Log data saved to: {SAVE_DIR}")
 
 # === Run Visualisation ===
-#init_visualiser()
-'''
-def run_mppi_visualization():
-    global data
-
-    with mujoco.viewer.launch_passive(model, data) as viewer:
-        # Sync sim and viewer clocks
-        mujoco.mj_forward(model, data)
-        last_update_time = time.time()
-
-        while viewer.is_running():
-            # Keep real-time simulation
-            now = time.time()
-            sim_elapsed = now - last_update_time
-            last_update_time = now
-
-            for _ in range(int(sim_elapsed / model.opt.timestep)):
-                mppi_controller(model, data)
-                mujoco.mj_step(model, data)
-
-            viewer.sync()
-
-if __name__ == "__main__":
-    run_mppi_visualization()
-'''
-
-
-'''
-try:
-    with launch_passive(model, data) as viewer:
-        while viewer.is_running():
-            mppi_controller(model, data)
-            viewer.sync()
-finally:
-    save_logs()
-'''
-'''
-try:
-    with mujoco.viewer.launch_passive(model, data) as viewer:
-        # Simulation loop
-        while viewer.is_running():
-            mujoco.mj_step(model, data)
-            viewer.sync()
-            time.sleep(0.001)
-'''
-'''
-try:
-    viewer = mjv.MujocoViewer(model, data)
-    # Simulate and render
-    for _ in range(1000):
-        if viewer.is_alive:
-            # Perform your simulation steps here
-            # ...
-            mujoco.mj_step(model, data)  # Example: advance the simulation
-            viewer.render()  # Render the scene
-        else:
-            break
-finally:
-    save_logs()
-'''
-
-'''
-try:
-    with mujoco.viewer.launch(model, data) as viewer:
-        while viewer.is_running():
-            mujoco.mj_step(model, data, controller_callback)  # <- this is what advances time
-            viewer.sync()
-finally:
-    save_logs()
-'''
-
-
 '''
 def simulate():
     with mujoco.viewer.launch_passive(model, data) as viewer:
@@ -402,16 +330,9 @@ def simulate():
     with viewer.launch_passive(model, data) as v:
         print("Simulation running. Close the viewer window to stop.")
         while v.is_running():
-            # Run controller to set data.ctrl
             mppi_controller(model, data)
-
-            # Step the simulation forward
             mujoco.mj_step(model, data)
-
-            # Send updated state to viewer
             v.sync()
-
-            # Optionally log data (uncomment if desired)
             log_data(data, data.ctrl)
             
 if __name__ == "__main__":
