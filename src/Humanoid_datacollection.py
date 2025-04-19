@@ -4,7 +4,8 @@ import os
 from threading import Thread, Lock
 from copy import deepcopy
 import mujoco
-import mujoco.viewer
+# import mujoco.viewer
+from mujoco import viewer 
 import numpy as np
 import os
 import time
