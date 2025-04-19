@@ -11,8 +11,8 @@ model = MuJoCo.load_model(model_path)
 data = MuJoCo.init_data(model)
 
 # Constants for MPPI
-Position = [0.2, 0.0]  # mutable goal position
-const goal_step = [0.2, 0.0]
+Position = [1.0, 0.0]  # mutable goal position
+const goal_step = [1.0, 0.0]
 goal_counter = 0  # Counter for goal reached
 const goal_threshold = 0.15  # Distance threshold to detect "goal reached"
 
