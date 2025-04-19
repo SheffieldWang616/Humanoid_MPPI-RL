@@ -12,10 +12,10 @@ data = MuJoCo.init_data(model)
 
 # Constants for MPPI
 const Position = [2.0, 0.0]
-const K = 30
-const T = 75
-const λ = 1.0
-const Σ = 0.75
+const K = 75  # num sample trajectories
+const T = 100 # horizon
+const λ = 1.0   # temperature
+const Σ = 0.75  # control noise for exploration
 
 const nx = length(data.qpos) + length(data.qvel)
 const nu = length(data.ctrl)
@@ -63,11 +63,11 @@ function humanoid_cost(qpos, qvel, ctrl, t)
     cost += 0.1 * yaw^2  # Penalize deviation from facing forward
 
     # Penalize distance from goal (xy)
-    cost += 12.5 * norm(root_pos[1:2] - target_pos[1:2])
+    cost += 12.0 * norm(root_pos[1:2] - target_pos[1:2])
 
     # Penalize torso height
     target_height = 1.28 #1.282 = initial_qpos_root_z
-    cost += 3.0 * (target_height - root_pos[3])  # softly keep torso up
+    cost += 25.0 * (target_height - root_pos[3])  # softly keep torso up
 
     # Penalize torso velocity difference
     cost += 1.0 * norm(root_lin_vel - target_vel)
@@ -93,21 +93,28 @@ function humanoid_cost(qpos, qvel, ctrl, t)
     stance_id = MuJoCo.body(model, foot_stance).id
 
     swing_foot = data.xpos[swing_id + 1, 1] # position of foot's current x
-    foot_targetx = root_pos[1] + 0.5  # 30cm ahead of torso
-    cost += 7.5 * (swing_foot - foot_targetx)^2
+    foot_targetx = root_pos[1] + 0.18  # 30cm ahead of torso changed from +0.5 to + 0.18
+    cost += 4.0 * (swing_foot - foot_targetx)^2 # changed from 1.0 to 4.0
 
     swing_knee = data.xpos[knee_swing + 1, 1] # position of knee's current 3
-    cost += 3.5 * (swing_knee - foot_targetx)^2
+    cost += 1.5 * (swing_knee - foot_targetx)^2
 
     swing_foot_z = data.xpos[swing_id + 1, 3] # position of swing foot's current z
-    knee_targetz = root_pos[3] - 0.4  # below 40cm of torso
-    #cost += 2.0 * (swing_knee - knee_targetz)^2
+    # knee_targetz = root_pos[3] - 0.4  # below 40cm of torso
+    # cost += 2.0 * (swing_knee - knee_targetz)^2
     
     stance_foot_z = data.xpos[stance_id + 1, 3] # position of stance foot's current z
     foot_clearance = swing_foot_z - stance_foot_z
     if foot_clearance < 0
-        cost -= 0.01 * foot_clearance
+        cost -= 0.005 * foot_clearance
     end
+
+    # # penalize back kick 
+    # # Get hip (torso) position in x and z
+    # knee_idx = MuJoCo.joint(model, "knee_right").qposadr
+    # Knee_angle = data.qpos[knee_idx]
+
+
 
     left_foot_y = data.xpos[MuJoCo.body(model, "foot_left").id + 1, 2] # position of left foot's current y
     right_foot_y = data.xpos[MuJoCo.body(model, "foot_right").id + 1, 2] # position of right foot's current y
@@ -117,6 +124,10 @@ function humanoid_cost(qpos, qvel, ctrl, t)
     end
 
     cost += 0.01 * sum(ctrl .^ 2)
+
+    # println("Torso Z: ", root_pos[3], " | Swing Foot X: ", swing_foot, " | Target: ", foot_targetx)
+    # println("Velocity: ", root_lin_vel, " | Foot clearance: ", foot_clearance)
+
 
     return cost
 end
