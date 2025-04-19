@@ -4,7 +4,8 @@ import os
 from threading import Thread, Lock
 from copy import deepcopy
 import mujoco
-import mujoco.viewer
+# import mujoco.viewer
+from mujoco import viewer 
 import numpy as np
 import os
 import time
@@ -301,7 +302,7 @@ def mppi_step(m, d):
 def mppi_controller(m, d):
     mppi_step(m, d)
     d.ctrl[:] = U_global[:, 0]
-    #log_data(d, U_global[:, 0])
+    log_data(d, U_global[:, 0])
     U_global[:, :-1] = U_global[:, 1:]
     U_global[:, -1] = 0.1 * U_global[:, -2]
 
