@@ -1,3 +1,6 @@
 checkpoints/
 runs/
 **/__pycache__/
+examine_result.ipynb
+src/Humanoid_mppi_tuning.jl
+.env/
