@@ -9,30 +9,7 @@ model_path = joinpath(@__DIR__, "humanoid.xml")
 model = MuJoCo.load_model(model_path)
 data = MuJoCo.init_data(model)
 
-#println("Fields in data struct:")
-#println(fieldnames(typeof(data)))
-
-#println("\nProperties available on data object:")
-#println(propertynames(data))
-
-#println("nq = ", length(data.qpos))
-#println("nv = ", length(data.qvel))
-#println("nu = ", length(data.ctrl))  # Usually same as model.nu
-
-# this following settings can make the humanoid stand for at least a second while "walking" towards the target
-# const K = 70   # num sample trajectories
-# const T = 80   # horizon
-# const λ = 1.0   # temperature
-# const Σ = 0.8  # control noise for exploration
-
-# this following settings can make the humanoid walk towards the target almost reaching it
-# const Position = [2.0, 0.0]
-# const K = 30  # num sample trajectories
-# const T = 75  # horizon
-# const λ = 1.0   # temperature
-# const Σ = 0.75  # control noise for exploration
-
-const Position = [2.0, 0.0]
+const Position = [2.0, 0.0, 1.28]
 const K = 30  # num sample trajectories
 const T = 75  # horizon
 const λ = 1.0   # temperature
@@ -50,40 +27,29 @@ end
 function humanoid_cost(qpos, qvel, ctrl, t)
     cost = 0.0
 
-    # Extract torso position and orientation
-    root_pos = qpos[1:3]  # x, y, z position
-    target_pos = Position # position of the target
+    root_pos = qpos[1:3]                      # torso position: x, y, z
+    target_pos = Position                     # global constant target
+    torso_quat = qpos[4:7]                    # orientation quaternion
 
-    torso_quat = qpos[4:7] # quaternion orientation
+    root_lin_vel = qvel[1:2]                  # linear velocity in xy
+    target_vel = [0.3, 0.0]                   # desired forward velocity
 
-    # Desired forward velocity (x-direction)
-    root_lin_vel = qvel[1:2] # only xy
-    target_vel = [0.4, 0.0]  # only xy
+    # === Orientation Penalties ===
+    roll = atan(2(torso_quat[1]*torso_quat[2] + torso_quat[3]*torso_quat[4]),
+                1 - 2(torso_quat[2]^2 + torso_quat[3]^2))
+    pitch = asin(2(torso_quat[1]*torso_quat[3] - torso_quat[4]*torso_quat[2]))
+    yaw = atan(2(torso_quat[1]*torso_quat[4] + torso_quat[2]*torso_quat[3]),
+               1 - 2(torso_quat[3]^2 + torso_quat[4]^2))
+    
+    cost += 5.0 * (abs2(roll) + abs2(pitch))    # Upright
+    cost += 0.075 * abs2(yaw)                   # Facing forward
 
-    # Weights (can tune these)
-    # Penalize torso rotation (try to keep it upright)
-    # Convert quaternion to roll and pitch
-    roll = atan(2(torso_quat[1] * torso_quat[2] + torso_quat[3] * torso_quat[4]),
-        1 - 2(torso_quat[2]^2 + torso_quat[3]^2))
-    pitch = asin(2(torso_quat[1] * torso_quat[3] - torso_quat[4] * torso_quat[2]))
-    cost += 5.0 * (roll^2 + pitch^2)  # Keep upright and restrict pitch rotation further
+    # === Position and Velocity ===
+    cost += 12.5 * norm(root_pos[1:2] - target_pos[1:2])     # xy target
+    cost += 5.0 * norm(target_pos[3] - root_pos[3])          # height
+    cost += 1.0 * norm(root_lin_vel - target_vel)            # velocity
 
-    # Restric Yaw rotation
-    yaw = atan(2(torso_quat[1] * torso_quat[4] + torso_quat[2] * torso_quat[3]),
-           1 - 2(torso_quat[3]^2 + torso_quat[4]^2))
-    cost += 0.1 * yaw^2  # Penalize deviation from facing forward
-
-    # Penalize distance from goal (xy)
-    cost += 12.0 * norm(root_pos[1:2] - target_pos[1:2])
-
-    # Penalize torso height
-    target_height = 1.28 #1.282 = initial_qpos_root_z
-    cost += 2.5 * (target_height - root_pos[3])  # softly keep torso up
-
-    # Penalize torso velocity difference
-    cost += 1.0 * norm(root_lin_vel - target_vel)
-
-    # Get body IDs
+    # === Gait Symmetry & Foot Targeting ===
     id_left = MuJoCo.body(model, "shin_left").id
     id_right = MuJoCo.body(model, "shin_right").id
 
@@ -103,34 +69,41 @@ function humanoid_cost(qpos, qvel, ctrl, t)
     swing_id = MuJoCo.body(model, foot_swing).id
     stance_id = MuJoCo.body(model, foot_stance).id
 
-    swing_foot = data.xpos[swing_id + 1, 1] # position of foot's current x
-    foot_targetx = root_pos[1] + 0.5  # 30cm ahead of torso
-    cost += 7.5 * (swing_foot - foot_targetx)^2
+    # === Foot X/Y Target ===
+    foot_targetx = root_pos[1] + 0.5
+    swing_foot_x = data.xpos[swing_id + 1, 1]
+    cost += 8.0 * norm(swing_foot_x - foot_targetx)
 
-    swing_knee = data.xpos[knee_swing + 1, 1] # position of knee's current 3
-    cost += 3.0 * (swing_knee - foot_targetx)^2
+    # === Reward forward velocity of swing foot ===
+    swing_vel_x = get_body_vx(data, swing_id)
+    cost += -0.15 * swing_vel_x  # reward forward motion (tune this)
 
-    swing_foot_z = data.xpos[swing_id + 1, 3] # position of swing foot's current z
-    knee_targetz = root_pos[3] - 0.4  # below 40cm of torso
-    #cost += 2.0 * (swing_knee - knee_targetz)^2
-    
-    stance_foot_z = data.xpos[stance_id + 1, 3] # position of stance foot's current z
+    # === Knee Tracking ===
+    swing_knee_x = data.xpos[knee_swing + 1, 1]
+    cost += 3.0 * abs2(swing_knee_x - foot_targetx)
+
+    # === Swing Clearance ===
+    swing_foot_z = data.xpos[swing_id + 1, 3]
+    stance_foot_z = data.xpos[stance_id + 1, 3]
     foot_clearance = swing_foot_z - stance_foot_z
-    if foot_clearance < 0
-        cost -= 0.01 * foot_clearance
+    if foot_clearance < 0.05
+        cost += 2.0 * abs2(foot_clearance)  # penalize dragging foot
     end
 
-    left_foot_y = data.xpos[MuJoCo.body(model, "foot_left").id + 1, 2] # position of left foot's current y
-    right_foot_y = data.xpos[MuJoCo.body(model, "foot_right").id + 1, 2] # position of right foot's current y
+    # === Leg Lateral Symmetry ===
+    left_foot_y = data.xpos[MuJoCo.body(model, "foot_left").id + 1, 2]
+    right_foot_y = data.xpos[MuJoCo.body(model, "foot_right").id + 1, 2]
     leg_clearance = left_foot_y - right_foot_y
     if leg_clearance < 0
-        cost -= 1.0 * leg_clearance
+        cost += 0.5 * abs2(leg_clearance)  # asymmetry penalty
     end
 
+    # === Control Regularization ===
     cost += 0.01 * sum(ctrl .^ 2)
 
     return cost
 end
+
 
 function running_cost(x_pos, theta, x_vel, theta_vel, control)
     cart_pos_cost = 1.0 * x_pos^2
