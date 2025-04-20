@@ -60,6 +60,7 @@ class FeatureAttentionStatePredictor(nn.Module):
         attention = nn.MultiheadAttention(hidden_dim, num_heads=4, batch_first=True)
         self.attentions = nn.ModuleList([attention for _ in range(attn_layers)])
         self.fc2 = nn.Linear(hidden_dim, state_dim)
+        self.relu = nn.ReLU()
 
     def forward(self, x, return_attn=False):
         x = F.relu(self.fc1(x))
@@ -67,6 +68,7 @@ class FeatureAttentionStatePredictor(nn.Module):
         attentions = [] if return_attn else None
         for attn in self.attentions:
             x, attn_weights = attn(x, x, x)
+            x = self.relu(x)
             attentions.append(attn_weights) if return_attn else None
 
         x = x.squeeze(1)

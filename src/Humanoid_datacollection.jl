@@ -1,3 +1,10 @@
+Pkg.add("MuJoCo")
+Pkg.add("BangBang")
+Pkg.add("FFMPEG")
+Pkg.add("GLFW")
+Pkg.add("Observables")
+Pkg.add("PrettyTables")
+Pkg.add("StaticArrays")
 using MuJoCo
 using LinearAlgebra
 using Random
