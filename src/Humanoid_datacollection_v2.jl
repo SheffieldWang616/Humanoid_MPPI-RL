@@ -36,6 +36,11 @@ function log_data!(d::MuJoCo.Data, u::Vector{Float64})
     push!(LOG_ACTIONS, copy(u))              # control
 end
 
+function get_body_vx(data, body_id)
+    start = body_id * 6 - 5  # body_id-th 6D block
+    return data.cvel[start + 3]  # vx is the 4th value (index 3)
+end
+
 function humanoid_cost(qpos, qvel, ctrl, t)
     cost = 0.0
 
