@@ -89,10 +89,12 @@ def humanoid_cost(qpos, qvel, ctrl, t):
         foot_swing = "foot_left"
         foot_stance = "foot_right"
         knee_swing = id_left
+        knee_stance = id_right
     else:
         foot_swing = "foot_right"
         foot_stance = "foot_left"
         knee_swing = id_right
+        knee_stance = id_left
 
     swing_id = model.body(foot_swing).id
     stance_id = model.body(foot_stance).id
@@ -103,23 +105,37 @@ def humanoid_cost(qpos, qvel, ctrl, t):
     cost += 8.0 * np.abs(swing_foot_x - foot_targetx)
 
     swing_vel_x = get_body_vx(data, swing_id)
-    cost -= 0.15 * swing_vel_x
+    cost -= 1000*swing_vel_x #0.15
 
     swing_knee_x = data.xpos[knee_swing, 0]
     cost += 3.0 * (swing_knee_x - foot_targetx)**2
 
+    swing_knee_z = data.xpos[knee_swing, 2]
     swing_foot_z = data.xpos[swing_id, 2]
+    if swing_foot_z >= (swing_knee_z-0.2): 
+        cost += 2.0*(swing_foot_z - swing_knee_z)**2
     stance_foot_z = data.xpos[stance_id, 2]
     foot_clearance = swing_foot_z - stance_foot_z
-    if foot_clearance < 0.05:
+    if foot_clearance < 0.005:
         cost += 2.0 * foot_clearance**2
+
+    hip_left = np.array([data.xpos[model.joint("hip_x_left").id],data.xpos[model.joint("hip_y_left").id],data.xpos[model.joint("hip_z_left").id]])
+    hip_right = np.array([data.xpos[model.joint("hip_x_right").id],data.xpos[model.joint("hip_y_right").id],data.xpos[model.joint("hip_z_right").id]])
+
+    #hip_width = np.linalg.norm(hip_left - hip_right)
+    #print(np.linalg.norm(data.xpos[model.joint("hip_z_left").id] - data.xpos[model.joint("hip_z_right").id]), np.linalg.norm(left_foot_y - right_foot_y), np.linalg.norm(left_knee_y - right_knee_y))
 
     left_foot_y = data.xpos[model.body("foot_left").id, 1]
     right_foot_y = data.xpos[model.body("foot_right").id, 1]
-    leg_clearance = left_foot_y - right_foot_y
-    if leg_clearance < 0:
-        #cost -= 1.0 * leg_clearance
-        cost += 0.5 * leg_clearance**2
+    leg_clearance = np.linalg.norm(left_foot_y - right_foot_y)
+    if leg_clearance <= 0.17 or leg_clearance >= 0.19:
+        cost += 2.0 * leg_clearance**2
+    
+    left_knee_y = data.xpos[model.body("shin_left").id, 1]
+    right_knee_y = data.xpos[model.body("shin_right").id, 1]
+    knee_clearance = np.linalg.norm(left_knee_y - right_knee_y)
+    if knee_clearance <= 0.17 or knee_clearance >= 0.19:
+        cost += 2.0 * knee_clearance**2
 
     cost += 0.01 * np.sum(ctrl ** 2)
 
