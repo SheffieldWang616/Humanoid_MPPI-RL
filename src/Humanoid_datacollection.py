@@ -27,7 +27,10 @@ model = mujoco.MjModel.from_xml_path(model_path)# mj_loadXML(model_path)
 data = MjData(model)
 
 # === MPPI Constants ===
-Position = np.array([2.0, 1.0])
+Position = np.array([1.0, 0.0, 1.28])
+goal_step = np.array([1.0, 0.0, 0.0])
+goal_counter = 0
+goal_threshold = 0.15
 K = 30
 T = 75
 λ = 1.0
@@ -159,10 +162,29 @@ def mppi_step(m, d):
             temp += weights[k] * noise[:, t, k]
         U_global[:, t] += temp
 
+'''
 def mppi_controller(m, d):
     mppi_step(m, d)
     d.ctrl[:] = U_global[:, 0]
     log_data(d, U_global[:, 0])
+    U_global[:, :-1] = U_global[:, 1:]
+    U_global[:, -1] = 0.1 * U_global[:, -2]
+'''
+def mppi_controller(model, data):
+    global Position, goal_counter
+
+    mppi_step(model, data)
+    data.ctrl[:] = U_global[:, 0]
+    log_data(data, U_global[:, 0])
+
+    root_pos = data.qpos[:3]
+    xy_dist = np.linalg.norm(root_pos[:2] - Position[:2])
+    z_diff = abs(root_pos[2] - Position[2])
+    if xy_dist < goal_threshold and z_diff < 0.1:
+        goal_counter += 1
+        Position = goal_counter * goal_step
+        print(f"Goal Reached: {goal_counter} Times. New goal: {Position}")
+
     U_global[:, :-1] = U_global[:, 1:]
     U_global[:, -1] = 0.1 * U_global[:, -2]
 
@@ -186,7 +208,10 @@ def simulate():
             log_data(data, data.ctrl)
             
 if __name__ == "__main__":
-    simulate()
+    try:
+        simulate()
+    finally:
+        save_logs()
 
 
 

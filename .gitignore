@@ -1,4 +1,4 @@
-checkpoints/
+checkpoints/model_epoch_*
 runs/
 **/__pycache__/
 examine_result.ipynb
