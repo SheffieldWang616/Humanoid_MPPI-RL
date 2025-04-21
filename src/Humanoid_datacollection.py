@@ -27,7 +27,7 @@ model = mujoco.MjModel.from_xml_path(model_path)# mj_loadXML(model_path)
 data = MjData(model)
 
 # === MPPI Constants ===
-Position = np.array([2.0, 0.0, 1.28])
+Position = np.array([2.0, 1.0])
 K = 30
 T = 75
 λ = 1.0
