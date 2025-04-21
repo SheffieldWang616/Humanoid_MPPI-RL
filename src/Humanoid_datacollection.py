@@ -40,7 +40,7 @@ nx = model.nq + model.nv
 nu = model.nu
 
 # === Logging Setup ===
-SAVE_DIR = os.path.join("data", datetime.now().strftime("%Y-%m-%d_%H%M%S"))
+SAVE_DIR = os.path.join("Humanoid_MPPI-RL/data", datetime.now().strftime("%Y-%m-%d_%H%M%S"))
 Path(SAVE_DIR).mkdir(parents=True, exist_ok=True)
 
 LOG_STATES = []
@@ -171,7 +171,7 @@ def mppi_controller(m, d):
     U_global[:, -1] = 0.1 * U_global[:, -2]
 '''
 def mppi_controller(model, data):
-    global Position, goal_counter
+    global Position, goal_counter, goal_step, goal_threshold
 
     mppi_step(model, data)
     data.ctrl[:] = U_global[:, 0]
@@ -184,6 +184,8 @@ def mppi_controller(model, data):
         goal_counter += 1
         Position = goal_counter * goal_step
         print(f"Goal Reached: {goal_counter} Times. New goal: {Position}")
+        save_logs()
+        
 
     U_global[:, :-1] = U_global[:, 1:]
     U_global[:, -1] = 0.1 * U_global[:, -2]
@@ -208,10 +210,9 @@ def simulate():
             log_data(data, data.ctrl)
             
 if __name__ == "__main__":
-    try:
-        simulate()
-    finally:
-        save_logs()
+    simulate()
+    #finally:
+    #    save_logs()
 
 
 
