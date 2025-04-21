@@ -2,5 +2,10 @@ checkpoints/model_epoch_*
 runs/
 **/__pycache__/
 examine_result.ipynb
-src/Humanoid_mppi_tuning.jl
+
 .env/
+Visualization/trajectory.csv
+src/Humanoid_mppi_tuning.jl
+# ingnore all data files
+data*
+

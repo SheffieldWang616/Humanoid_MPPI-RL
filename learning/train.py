@@ -67,10 +67,13 @@ def train_model(device='cuda'):
     model = CrossAttentionStatePredictor(
                                         qpos_dim=28, qvel_dim=27, action_dim=21, 
                                         hidden_dim=128, 
-                                        num_heads=6, 
+                                        num_heads=4, 
                                         dropout_rate=0.18).to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    # model = CrossAttentionStatePredictor(
+    #     qpos_dim=2, qvel_dim=2, action_dim=1, hidden_dim=144, num_heads=6, dropout_rate=0.18).to(device)
+
+    optimizer = optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-5)
     num_epochs = 200
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=num_epochs, eta_min=1e-5)
