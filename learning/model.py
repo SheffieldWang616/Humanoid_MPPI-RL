@@ -152,6 +152,56 @@ class FeatureAttentionStatePredictor(nn.Module):
         else:
             return x
 
+
+# Cross Attention State Predictor
+class CrossAttentionStatePredictor(nn.Module):
+    def __init__(self, qpos_dim=28, qvel_dim=27, action_dim=21, hidden_dim=128, num_heads=6, dropout_rate=0.18):
+        super(CrossAttentionStatePredictor, self).__init__()
+        self.qpos_dim = qpos_dim
+        self.qvel_dim = qvel_dim
+        self.state_dim = qpos_dim + qvel_dim
+        self.input_dim = self.state_dim + action_dim
+
+        # Linear encoders for qpos, qvel, and action
+        self.qpos_encoder = nn.Linear(qpos_dim, hidden_dim)
+        self.qvel_encoder = nn.Linear(qvel_dim, hidden_dim)
+        self.action_encoder = nn.Linear(action_dim, hidden_dim)
+
+        # Cross attention blocks
+        self.attn_qpos_to_qvel = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=num_heads, dropout=dropout_rate, batch_first=True)
+        self.attn_qvel_to_qpos = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=num_heads, dropout=dropout_rate, batch_first=True)
+
+        # FFN + prediction
+        self.fusion_layer = nn.Sequential(
+            nn.LayerNorm(hidden_dim * 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, self.state_dim)
+        )
+
+    def forward(self, x):
+        # Split input into qpos, qvel, action
+        qpos = x[:, :self.qpos_dim]            # [B, 27]
+        qvel = x[:, self.qpos_dim:self.state_dim]  # [B, 28]
+        action = x[:, self.state_dim:]         # [B, 21]
+
+        # Encode features
+        qpos_feat = self.qpos_encoder(qpos).unsqueeze(1)  # [B, 1, D]
+        qvel_feat = self.qvel_encoder(qvel).unsqueeze(1)  # [B, 1, D]
+        action_feat = self.action_encoder(action).unsqueeze(1)  # [B, 1, D]
+
+        # Cross attention
+        qpos_attn, _ = self.attn_qpos_to_qvel(qpos_feat, qvel_feat, qvel_feat)  # [B, 1, D]
+        qvel_attn, _ = self.attn_qvel_to_qpos(qvel_feat, qpos_feat, qpos_feat)  # [B, 1, D]
+
+        # Concatenate attended features
+        fused = torch.cat([qpos_attn.squeeze(1), qvel_attn.squeeze(1)], dim=-1)  # [B, 2D]
+
+        # Predict delta or next state
+        return self.fusion_layer(fused)
+
+
 if __name__ == "__main__":
     # Example usage
     model = MLPStatePredictor(state_dim=55, action_dim=21, hidden_dim=128, use_batch_norm=True, dropout_rate=0.2)

@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 from model import MLPStatePredictor, FeatureAttentionStatePredictor
+from model import CrossAttentionStatePredictor
 from data_loader import StateActionDataset
 from torch.utils.data import DataLoader
 import torch.optim as optim
@@ -60,8 +61,14 @@ def train_model(device='cuda'):
     print(f"Eval dataset size: {len(eval_dataset)}")
 
     # model = MLPStatePredictor(state_dim=55, action_dim=21, hidden_dim=512, use_batch_norm=True, dropout_rate=0.2, hidden_layers=6).to(device)
-    model = FeatureAttentionStatePredictor(
-        state_dim=55, action_dim=21, hidden_dim=256, num_heads=4, attn_layers=4).to(device)
+    # model = FeatureAttentionStatePredictor(
+    #     state_dim=55, action_dim=21, hidden_dim=256, num_heads=4, attn_layers=4).to(device)
+
+    model = CrossAttentionStatePredictor(
+                                        qpos_dim=28, qvel_dim=27, action_dim=21, 
+                                        hidden_dim=128, 
+                                        num_heads=6, 
+                                        dropout_rate=0.18).to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
     num_epochs = 200
