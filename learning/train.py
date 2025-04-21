@@ -21,8 +21,8 @@ def pct_l1_loss(output, target):
 
 
 def train_model(device='cuda'):
-    state_csv = "data/2025-04-19_153833/states.csv"
-    action_csv = "data/2025-04-19_153833/actions.csv"
+    state_csv = "data/2025-04-20_152026/states.csv"
+    action_csv = "data/2025-04-20_152026/actions.csv"
     ckpt_dir = "checkpoints"
     os.makedirs(ckpt_dir, exist_ok=True)
 
@@ -64,7 +64,7 @@ def train_model(device='cuda'):
         state_dim=55, action_dim=21, hidden_dim=256, num_heads=4, attn_layers=4).to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
-    num_epochs = 200
+    num_epochs = 20
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=num_epochs, eta_min=1e-5)
 

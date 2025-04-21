@@ -12,8 +12,8 @@ data = MuJoCo.init_data(model)
 
 # Constants for MPPI
 const Position = [2.0, 0.0, 1.28]
-const K = 30
-const T = 75
+const K = 50
+const T = 100
 const λ = 1.0
 const Σ = 0.75
 
