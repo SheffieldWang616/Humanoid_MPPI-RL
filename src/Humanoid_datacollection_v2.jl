@@ -11,11 +11,15 @@ model = MuJoCo.load_model(model_path)
 data = MuJoCo.init_data(model)
 
 # Constants for MPPI
-const Position = [2.0, 0.0, 1.28]
-const K = 30
-const T = 75
-const λ = 1.0
-const Σ = 0.75
+Position = [1.0, 0.0, 1.28]  # mutable goal position
+const goal_step = [1.0, 0.0, 0.0]
+goal_counter = 0  # Counter for goal reached
+const goal_threshold = 0.15  # Distance threshold to detect "goal reached"
+
+const K = 50  # num sample trajectories
+const T = 100 # horizon
+const λ = 1.0   # temperature
+const Σ = 0.5  # control noise for exploration
 
 const nx = length(data.qpos) + length(data.qvel)
 const nu = length(data.ctrl)
@@ -34,6 +38,12 @@ function log_data!(d::MuJoCo.Data, u::Vector{Float64})
     push!(LOG_TIMES, d.time)
     push!(LOG_STATES, vec(vcat(d.qpos, d.qvel)))  # full state
     push!(LOG_ACTIONS, copy(u))              # control
+end
+
+
+function get_body_vx(data, body_id)
+    start = body_id * 6 - 5  # body_id-th 6D block
+    return data.cvel[start + 3]  # vx is the 4th value (index 3)
 end
 
 function humanoid_cost(qpos, qvel, ctrl, t)
@@ -166,6 +176,17 @@ function mppi_controller!(m::Model, d::Data)
 
     # Log state and control
     log_data!(d, U_global[:, 1])
+
+    root_pos = d.qpos[1:3]  # torso x, y, z
+    xy_dist = norm(root_pos[1:2] .- Position[1:2])
+    z_diff = abs(root_pos[3] - Position[3])
+    if xy_dist < goal_threshold && z_diff < 0.1
+        global goal_counter
+        goal_counter += 1
+        Position .= goal_counter .* goal_step 
+        println("Goal Reached : ", goal_counter," Times. ", "New goal position: ", Position)
+    end
+
 
     # Shift control sequence
     U_global[:, 1:end-1] .= U_global[:, 2:end]
