@@ -1,8 +1,7 @@
 import torch
 import numpy as np
 from model import MLPStatePredictor, FeatureAttentionStatePredictor
-from model import CrossAttentionStatePredictor
-from data_loader import StateActionDataset
+from data_loader import StateActionDataset, MultiTrajectoryDataset
 from torch.utils.data import DataLoader
 import torch.optim as optim
 import torch.nn.functional as F
@@ -22,9 +21,10 @@ def pct_l1_loss(output, target):
 
 
 def train_model(device='cuda'):
-    state_csv = "data/2025-04-19_153833/states.csv"
-    action_csv = "data/2025-04-19_153833/actions.csv"
-    ckpt_dir = "checkpoints"
+    state_csv = "data/states_ft"
+    action_csv = "data/actions_ft"
+    ckpt_dir = "checkpoints_state_only"
+    # ckpt_dir = "checkpoints_cartpole_l1"
     os.makedirs(ckpt_dir, exist_ok=True)
 
     # Initialize TensorBoard writer
@@ -38,9 +38,14 @@ def train_model(device='cuda'):
     dataset_normalize = False
     dataset_random_split = True
     dataset_smooth_window_size = 0
+    train_ratio = 0.95
+    dataset_idxes = list(range(0, 28)) + [55, 56]
 
-    dataset = StateActionDataset(state_csv, action_csv, return_type=dataset_type, normalize=dataset_normalize,
-                                 random_split=dataset_random_split, smooth_window_size=dataset_smooth_window_size)
+    dataset = MultiTrajectoryDataset(state_csv, action_csv, return_type=dataset_type, normalize=dataset_normalize, train_ratio=train_ratio,
+                                        random_split=dataset_random_split, smooth_window_size=dataset_smooth_window_size,
+                                        state_idxes=dataset_idxes)
+    # dataset = StateActionDataset(state_csv, action_csv, return_type=dataset_type, normalize=dataset_normalize, train_ratio=0.9,
+    #                              random_split=dataset_random_split, smooth_window_size=dataset_smooth_window_size)
     train_loader = DataLoader(
         dataset,
         batch_size=32,
@@ -48,8 +53,11 @@ def train_model(device='cuda'):
         num_workers=4,
         pin_memory=True,
     )
-    eval_dataset = StateActionDataset(state_csv, action_csv, return_type=dataset_type, split='eval',
-                                      normalize=dataset_normalize, random_split=dataset_random_split, smooth_window_size=dataset_smooth_window_size)
+    eval_dataset = MultiTrajectoryDataset(state_csv, action_csv, return_type=dataset_type, normalize=dataset_normalize, train_ratio=train_ratio, split='eval',
+                                        random_split=dataset_random_split, smooth_window_size=dataset_smooth_window_size,
+                                        state_idxes=dataset_idxes)
+    # eval_dataset = StateActionDataset(state_csv, action_csv, return_type=dataset_type, split='eval', train_ratio=0.9,
+    #                                   normalize=dataset_normalize, random_split=dataset_random_split, smooth_window_size=dataset_smooth_window_size)
     eval_loader = DataLoader(
         eval_dataset,
         batch_size=32,
@@ -61,23 +69,17 @@ def train_model(device='cuda'):
     print(f"Eval dataset size: {len(eval_dataset)}")
 
     # model = MLPStatePredictor(state_dim=55, action_dim=21, hidden_dim=512, use_batch_norm=True, dropout_rate=0.2, hidden_layers=6).to(device)
+    model = FeatureAttentionStatePredictor(
+        state_dim=len(dataset_idxes), action_dim=21, hidden_dim=512, num_heads=4, attn_layers=4).to(device)
     # model = FeatureAttentionStatePredictor(
-    #     state_dim=55, action_dim=21, hidden_dim=256, num_heads=4, attn_layers=4).to(device)
-
-    model = CrossAttentionStatePredictor(
-                                        qpos_dim=28, qvel_dim=27, action_dim=21, 
-                                        hidden_dim=128, 
-                                        num_heads=4, 
-                                        dropout_rate=0.18).to(device)
-
-    # model = CrossAttentionStatePredictor(
-    #     qpos_dim=2, qvel_dim=2, action_dim=1, hidden_dim=144, num_heads=6, dropout_rate=0.18).to(device)
-
-    optimizer = optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-5)
+    #     state_dim=4, action_dim=1, hidden_dim=64, num_heads=4, attn_layers=2).to(device)
+    # model.load_state_dict(torch.load("checkpoints_cartpole/model_final.pth"))
+    optimizer = optim.Adam(model.parameters(), lr=1e-4)
     num_epochs = 200
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=num_epochs, eta_min=1e-5)
-
+        optimizer, T_max=num_epochs, eta_min=1e-6)
+    model.load_state_dict(torch.load("checkpoints_state_only/model_best.pth"))
+    eval_loss_min = float('inf')
     model.train()
     loss_function = torch.nn.MSELoss()
     for epoch in range(num_epochs):
@@ -115,6 +117,7 @@ def train_model(device='cuda'):
             mean_pct_diffs = []
             max_pct_diffs = []
             losses = []
+            diffs = []
             for batch_idx, (input_features, target) in enumerate(eval_loader):
                 input_features = input_features.to(device)
                 target = target.to(device)
@@ -124,13 +127,15 @@ def train_model(device='cuda'):
 
                 target = target.cpu().numpy()
                 output = output.cpu().numpy()
+                input_features = input_features.cpu().numpy()
                 diff = np.abs(output - target)
                 mean_diff = np.mean(diff)
                 max_diff = np.max(diff)
 
-                mean_pct_diff = np.mean(np.abs(diff / target))
-                max_pct_diff = np.max(np.abs(diff / target))
+                mean_pct_diff = np.mean(np.abs(diff / input_features[:, :diff.shape[1]]))
+                max_pct_diff = np.max(np.abs(diff / input_features[:, :diff.shape[1]]))
 
+                diffs.append(diff)
                 mean_diffs.append(mean_diff)
                 max_diffs.append(max_diff)
                 mean_pct_diffs.append(mean_pct_diff)
@@ -141,6 +146,12 @@ def train_model(device='cuda'):
             loss = np.mean(losses)
             mean_pct_diff = np.mean(mean_pct_diffs)
             max_pct_diff = np.mean(max_pct_diffs)
+            if loss < eval_loss_min:
+                eval_loss_min = loss
+                # Save the model if the loss is lower than the previous minimum
+                model_path = os.path.join(ckpt_dir, "model_best.pth")
+                torch.save(model.state_dict(), model_path)
+                print(f"Best model saved to {model_path}")
         print(
             f"Epoch [{epoch+1}/{num_epochs}], Eval Mean Diff: {mean_diff:.4f}, Max Diff: {max_diff:.4f} Loss: {loss.item():.4f}")
 
@@ -149,9 +160,20 @@ def train_model(device='cuda'):
         writer.add_scalar("Eval/Mean_Pct_Diff", mean_pct_diff, epoch)
         writer.add_scalar("Eval/Max_Pct_Diff", max_pct_diff, epoch)
         writer.add_scalar("Eval/Loss", loss.item(), epoch)
+        
+        diffs = np.array(diffs)
+        # log each diff to tensorboard, each diff has its own column
+        for i in range(diffs.shape[1]):
+            writer.add_scalar(f"Diffs/Column_{i}", np.mean(diffs[:, i]), epoch)
+            writer.add_scalar(f"Diffs/Max_Column_{i}", np.max(diffs[:, i]), epoch)
+            writer.add_scalar(f"Diffs/Pct_Column_{i}", np.mean(np.abs(diffs[:, i] / input_features[:, i])), epoch)
 
     writer.close()
     print("Training complete.")
+    # Save the final model
+    model_path = os.path.join(ckpt_dir, "model_final.pth")
+    torch.save(model.state_dict(), model_path)
+    print(f"Final model saved to {model_path}")
     # print first 5 predictions
     for i in range(3):
         model.eval()
