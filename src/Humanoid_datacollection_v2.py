@@ -43,7 +43,7 @@ nx = model.nq + model.nv
 nu = model.nu
 
 # how many consecutive frames to wait before switching
-PHASE_DELAY = 2
+PHASE_DELAY = 3
 
 # last instantaneously‐detected side ("left" or "right")
 _last_inst_side = None  
@@ -100,12 +100,12 @@ def humanoid_cost(qpos, qvel, bvel, ctrl, t):
     yaw = np.arctan2(2 * (w*z + x*y), 1 - 2*(y*y + z*z))
 
     cost += 4.0 * (roll**2 + pitch**2)
-    cost += 0.5 * yaw**2
-    cost += 3.0 * np.linalg.norm(root_pos[:2] - target_pos[:2])**2
+    cost += 1.0 * yaw**2
+    cost += 12.0 * np.linalg.norm(root_pos[:2] - target_pos[:2])
     target_height = 1.28
     cost += 10.0 * abs(target_height - root_pos[2])
-    cost += 2.0 * abs(root_pos[1])
-    #cost += 1.0 * np.linalg.norm(root_lin_vel - target_vel)
+    #cost += 0.1 * abs(root_pos[1])
+    cost += 1.0 * np.linalg.norm(root_lin_vel - target_vel)
 
     def get_body_vx(d, body_id):
         return bvel[body_id, 0]
@@ -133,8 +133,8 @@ def humanoid_cost(qpos, qvel, bvel, ctrl, t):
         # identify which foot is momentarily higher
     left_higher = data.xpos[ model.body("foot_left").id, 2 ] \
                 > data.xpos[ model.body("foot_right").id, 2 ]
-    #inst_side = "left" if left_higher else "right"
-    inst_side = "left" if vx_left > vx_right else "right"
+    inst_side = "left" if left_higher else "right"
+    #inst_side = "left" if vx_left > vx_right else "right"
 
     global _last_inst_side, _inst_count, _committed_side
 
@@ -178,19 +178,20 @@ def humanoid_cost(qpos, qvel, bvel, ctrl, t):
     swing_proj  = forward_world.dot(data.xpos[swing_id])
 
     # 4) compare to desired offset (0.5 m ahead of the root)
-    desired_proj = root_proj + 0.3
+    desired_proj = root_proj + 0.5
     cost += 8.0 * abs(swing_proj - desired_proj)
 
     # Reward positive knee‐joint velocity (only when it’s > 0):
     knee_vel = get_joint_vel(qvel, swing_id)   # or "knee_right"
     if knee_vel > 0:
-        cost -= 0.2 * knee_vel
+        cost -= 0.25 * knee_vel
     else:
         # Optional: penalize if it moves backward
         cost += 0.05 * (-knee_vel)
 
     swing_knee_x = forward_world.dot(data.xpos[knee_swing])
-    cost += 3.0 * abs(swing_knee_x - desired_proj)
+    #desired_proj = root_proj + 0.5
+    cost += 4.0 * abs(swing_knee_x - desired_proj)
 
     swing_foot_z = data.xpos[swing_id, 2]
     stance_foot_z = data.xpos[stance_id, 2]
