@@ -23,6 +23,7 @@ from pathlib import Path
 
 # === Model and Data Initialization ===
 model_path = os.path.join(os.path.dirname(__file__), "humanoid.xml")
+print(model_path)
 model = mujoco.MjModel.from_xml_path(model_path)# mj_loadXML(model_path)
 data = MjData(model)
 
