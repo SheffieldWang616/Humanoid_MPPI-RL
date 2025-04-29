@@ -121,7 +121,7 @@ class StateActionDataset(Dataset):
     
 class MultiTrajectoryDataset(Dataset):
     def __init__(self, states_dir, actions_dir, normalize=False, smooth_window_size=0, add_noise=0.0,
-                 return_type='raw', split='train', train_ratio=0.8, random_split=False, seed=42, state_idxes = []):
+                 return_type='raw', split='train', train_ratio=0.8, random_split=False, seed=42, state_idxes = None):
         """
         Dataset for loading state and action data from multiple CSV files in a directory
         
@@ -258,7 +258,7 @@ class MultiTrajectoryDataset(Dataset):
                         window=window_size, min_periods=1, center=True).mean().values
                 traj['states'] = smoothed_states
         print("State idxes:", state_idxes)
-        self.state_idxes = np.array(state_idxes)
+        self.state_idxes = np.array(state_idxes) if state_idxes is not None else None
         print("=" * 20)
         print(f"Configuration: split={split}, num_trajectories={len(self.trajectories)}, "
               f"train_size={len(self.train_indices)}, eval_size={len(self.eval_indices)}, "
