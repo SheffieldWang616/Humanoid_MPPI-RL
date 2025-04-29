@@ -40,7 +40,7 @@ nx = model.nq + model.nv
 nu = model.nu
 
 # === Logging Setup ===
-SAVE_DIR = os.path.join("data", datetime.now().strftime("%Y-%m-%d_%H%M%S"))
+SAVE_DIR = os.path.join("Humanoid_MPPI-RL/data", datetime.now().strftime("%Y-%m-%d_%H%M%S"))
 Path(SAVE_DIR).mkdir(parents=True, exist_ok=True)
 
 LOG_STATES = []
@@ -85,6 +85,7 @@ def humanoid_cost(qpos, qvel, ctrl, t):
     vx_left = get_body_vx(data, id_left)
     vx_right = get_body_vx(data, id_right)
 
+    '''
     if vx_left > vx_right:
         foot_swing = "foot_left"
         foot_stance = "foot_right"
@@ -120,6 +121,65 @@ def humanoid_cost(qpos, qvel, ctrl, t):
     if leg_clearance < 0:
         #cost -= 1.0 * leg_clearance
         cost += 0.5 * leg_clearance**2
+
+    cost += 0.01 * np.sum(ctrl ** 2)
+    
+    '''
+
+    if vx_left > vx_right:
+        foot_swing = "foot_left"
+        foot_stance = "foot_right"
+        knee_swing = id_left
+        knee_stance = id_right
+    else:
+        foot_swing = "foot_right"
+        foot_stance = "foot_left"
+        knee_swing = id_right
+        knee_stance = id_left
+
+    swing_id = model.body(foot_swing).id
+    stance_id = model.body(foot_stance).id
+
+    swing_foot_x = data.xpos[swing_id, 0]
+    foot_targetx = root_pos[0] + 0.5
+    cost += 8.0 * np.abs(swing_foot_x - foot_targetx)
+
+    swing_vel_x = get_body_vx(data, swing_id)
+    cost -= 1000*swing_vel_x #0.15
+
+    swing_knee_x = data.xpos[knee_swing, 0]
+    cost += 3.0 * (swing_knee_x - foot_targetx)**2
+
+    swing_knee_z = data.xpos[knee_swing, 2]
+    swing_foot_z = data.xpos[swing_id, 2]
+    if swing_foot_z >= (swing_knee_z-0.3): 
+        #print("SWING")
+        cost += 10000.0*(swing_foot_z - swing_knee_z)**2
+    stance_foot_z = data.xpos[stance_id, 2]
+    foot_clearance = swing_foot_z - stance_foot_z
+    if foot_clearance < 0.005:
+        #print("FOOT")
+        cost += 100.0 * foot_clearance**2
+
+    hip_left = np.array([data.xpos[model.joint("hip_x_left").id],data.xpos[model.joint("hip_y_left").id],data.xpos[model.joint("hip_z_left").id]])
+    hip_right = np.array([data.xpos[model.joint("hip_x_right").id],data.xpos[model.joint("hip_y_right").id],data.xpos[model.joint("hip_z_right").id]])
+
+    #hip_width = np.linalg.norm(hip_left - hip_right)
+    #print(np.linalg.norm(data.xpos[model.joint("hip_z_left").id] - data.xpos[model.joint("hip_z_right").id]), np.linalg.norm(left_foot_y - right_foot_y), np.linalg.norm(left_knee_y - right_knee_y))
+
+    left_foot_y = data.xpos[model.body("foot_left").id, 1]
+    right_foot_y = data.xpos[model.body("foot_right").id, 1]
+    leg_clearance = np.linalg.norm(left_foot_y - right_foot_y)
+    if leg_clearance <= 0.15 or leg_clearance >= 0.21:
+        #print("LEG")
+        cost += 100.0 * leg_clearance**2
+    
+    left_knee_y = data.xpos[model.body("shin_left").id, 1]
+    right_knee_y = data.xpos[model.body("shin_right").id, 1]
+    knee_clearance = np.linalg.norm(left_knee_y - right_knee_y)
+    if knee_clearance <= 0.15 or knee_clearance >= 0.21:
+        #print("KNEE")
+        cost += 100.0 * knee_clearance**2
 
     cost += 0.01 * np.sum(ctrl ** 2)
 
@@ -171,7 +231,7 @@ def mppi_controller(m, d):
     U_global[:, -1] = 0.1 * U_global[:, -2]
 '''
 def mppi_controller(model, data):
-    global Position, goal_counter
+    global Position, goal_counter, goal_step, goal_threshold
 
     mppi_step(model, data)
     data.ctrl[:] = U_global[:, 0]
@@ -184,6 +244,8 @@ def mppi_controller(model, data):
         goal_counter += 1
         Position = goal_counter * goal_step
         print(f"Goal Reached: {goal_counter} Times. New goal: {Position}")
+        save_logs()
+        
 
     U_global[:, :-1] = U_global[:, 1:]
     U_global[:, -1] = 0.1 * U_global[:, -2]
@@ -208,10 +270,9 @@ def simulate():
             log_data(data, data.ctrl)
             
 if __name__ == "__main__":
-    try:
-        simulate()
-    finally:
-        save_logs()
+    simulate()
+    #finally:
+    #    save_logs()
 
 
 

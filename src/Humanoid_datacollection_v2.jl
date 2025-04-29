@@ -10,10 +10,37 @@ model_path = joinpath(@__DIR__, "humanoid.xml")
 model = MuJoCo.load_model(model_path)
 data = MuJoCo.init_data(model)
 
+function randomize_initial_pose!(data)
+    # Keep standard pose but add small perturbations
+    
+    # Randomize root position (x, y) within reasonable limits
+    data.qpos[1] += (rand() - 0.5) * 0.4  # x position ±0.2m
+    data.qpos[2] += (rand() - 0.5) * 0.4  # y position ±0.2m
+    
+    # Small random perturbations to joint angles (indices 7 to end)
+    # Be careful with magnitude - too much can cause falls
+    for i in 7:length(data.qpos)
+        data.qpos[i] += (rand() - 0.5) * 0.1  # Small angle perturbations
+    end
+    
+    # Optional: Small random initial velocities
+    for i in 1:length(data.qvel)
+        data.qvel[i] += (rand() - 0.5) * 0.1  # Small velocity perturbations
+    end
+    
+    # Update positions in the model based on new qpos
+    MuJoCo.mj_forward(model, data)
+end
+
+# Call the randomization function
+randomize_initial_pose!(data)
+println("Initial Pose Randomized, qpos: ", data.qpos[1:7])
 # Constants for MPPI
-Position = [1.0, 0.0, 1.28]  # mutable goal position
+# Randomize x and y coordinates for the goal position
+Position = [rand()*2.0+0.5, rand()-0.5, 1.28]  #
+println("Randomized Goal Position: ", Position)
 const goal_step = [1.0, 0.0, 0.0]
-goal_counter = 0  # Counter for goal reached
+goal_counter = 1  # Counter for goal reached
 const goal_threshold = 0.15  # Distance threshold to detect "goal reached"
 
 const K = 50  # num sample trajectories
@@ -27,17 +54,30 @@ const nu = length(data.ctrl)
 # === Logging Setup ===
 
 save_timestamp = Dates.format(now(), "yyyy-mm-dd_HHMMSS")
-const SAVE_DIR = joinpath("data", save_timestamp)
-isdir(SAVE_DIR) || mkpath(SAVE_DIR)
+# const SAVE_DIR = joinpath("data", save_timestamp)
+# isdir(SAVE_DIR) || mkpath(SAVE_DIR)
+states_dir = joinpath("data", "states_ft")
+actions_dir = joinpath("data", "actions_ft")
+times_dir = joinpath("data", "times_ft")
+isdir(states_dir) || mkpath(states_dir)
+isdir(actions_dir) || mkpath(actions_dir)
+isdir(times_dir) || mkpath(times_dir)
 
 const LOG_STATES = Vector{Vector{Float64}}()
 const LOG_ACTIONS = Vector{Vector{Float64}}()
 const LOG_TIMES = Float64[]
 
 function log_data!(d::MuJoCo.Data, u::Vector{Float64})
+    # Get foot Z positions
+    foot_left_id = MuJoCo.body(model, "foot_left").id
+    foot_right_id = MuJoCo.body(model, "foot_right").id
+    foot_left_z = d.xpos[foot_left_id + 1, 3]
+    foot_right_z = d.xpos[foot_right_id + 1, 3]
+    
     push!(LOG_TIMES, d.time)
-    push!(LOG_STATES, vec(vcat(d.qpos, d.qvel)))  # full state
-    push!(LOG_ACTIONS, copy(u))              # control
+    # Append foot heights to the state vector
+    push!(LOG_STATES, vec(vcat(d.qpos, d.qvel, foot_left_z, foot_right_z)))
+    push!(LOG_ACTIONS, copy(u))
 end
 
 function get_body_vx(data, body_id)
@@ -169,6 +209,7 @@ function mppi_step!(m::Model, d::Data)
     end
 end
 
+goal_reached = false
 function mppi_controller!(m::Model, d::Data)
     mppi_step!(m, d)
     d.ctrl .= U_global[:, 1]
@@ -180,10 +221,12 @@ function mppi_controller!(m::Model, d::Data)
     xy_dist = norm(root_pos[1:2] .- Position[1:2])
     z_diff = abs(root_pos[3] - Position[3])
     if xy_dist < goal_threshold && z_diff < 0.1
-        global goal_counter
-        goal_counter += 1
-        Position .= goal_counter .* goal_step 
-        println("Goal Reached : ", goal_counter," Times. ", "New goal position: ", Position)
+        # global goal_counter
+        # goal_counter += 1
+        # Position .+= goal_step
+        # println("Goal Reached : ", goal_counter," Times. ", "New goal position: ", Position)
+        global goal_reached
+        goal_reached = true
     end
 
 
@@ -197,20 +240,38 @@ function save_logs()
     action_array = reduce(hcat, LOG_ACTIONS)'  # T × nu
     time_array = collect(LOG_TIMES)
 
-    writedlm(joinpath(SAVE_DIR, "states.csv"), state_array, ',')
-    writedlm(joinpath(SAVE_DIR, "actions.csv"), action_array, ',')
-    writedlm(joinpath(SAVE_DIR, "times.csv"), time_array, ',')
+    states_file_name = "states_$(save_timestamp).csv"
+    actions_file_name = "actions_$(save_timestamp).csv"
+    times_file_name = "times_$(save_timestamp).csv"
+    writedlm(joinpath(states_dir, states_file_name), state_array, ',')
+    writedlm(joinpath(actions_dir, actions_file_name), action_array, ',')
+    writedlm(joinpath(times_dir, times_file_name), time_array, ',')
+    # writedlm(joinpath(SAVE_DIR, "states.csv"), state_array, ',')
+    # writedlm(joinpath(SAVE_DIR, "actions.csv"), action_array, ',')
+    # writedlm(joinpath(SAVE_DIR, "times.csv"), time_array, ',')
 
-    println("Log data saved to: $SAVE_DIR")
 end
 
-
 # === Visualization and Save Hook ===
-init_visualiser()
+# init_visualiser()
 try
-    visualise!(model, data; controller=mppi_controller!)
+    for step in 1:10000  # Set appropriate number of steps
+        mppi_controller!(model, data)
+        mj_step(model, data)
+        if goal_reached
+            println("Goal Reached!")
+            break
+        end
+    end
+    println("Simulation completed, goal reached: ", goal_reached)
+    # visualise!(model, data; controller=mppi_controller!)
 finally
-    save_logs()
+    if goal_reached
+        println("Goal reached, saving logs...")
+        save_logs()
+    else
+        println("Goal not reached, not saving logs...")
+    end
 end
 
 
@@ -220,9 +281,10 @@ atexit() do
     action_array = reduce(hcat, LOG_ACTIONS)'  # T × nu
     time_array = collect(LOG_TIMES)
 
-    writedlm(joinpath(SAVE_DIR, "states.csv"), state_array, ',')
-    writedlm(joinpath(SAVE_DIR, "actions.csv"), action_array, ',')
-    writedlm(joinpath(SAVE_DIR, "times.csv"), time_array, ',')
-
-    println("Logged data saved to: $(SAVE_DIR)")
+    states_file_name = "states_$(save_timestamp).csv"
+    actions_file_name = "actions_$(save_timestamp).csv"
+    times_file_name = "times_$(save_timestamp).csv"
+    writedlm(joinpath(states_dir, states_file_name), state_array, ',')
+    writedlm(joinpath(actions_dir, actions_file_name), action_array, ',')
+    writedlm(joinpath(times_dir, times_file_name), time_array, ',')
 end
