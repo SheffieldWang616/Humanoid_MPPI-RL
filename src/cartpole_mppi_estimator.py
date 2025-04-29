@@ -4,6 +4,8 @@ import math
 import os
 
 import torch
+import pprint
+
 import sys
 sys.path.append(".")
 
@@ -18,6 +20,10 @@ model_path = os.path.join(os.path.dirname(__file__), "..", "models", "cartpole.x
 mjc_model = mujoco.MjModel.from_xml_path(model_path)
 mjc_data = mujoco.MjData(mjc_model)
 
+# initial state
+mjc_data.qpos[0] = 0.0
+mjc_data.qpos[1] = 0.0
+
 # === Load Trained Network Model ===
 net_model = FeatureAttentionStatePredictor(
     state_dim=4, action_dim=1, hidden_dim=64, num_heads=4, attn_layers=2, dropout_rate=0.0
@@ -28,10 +34,10 @@ net_model.load_state_dict(torch.load(pth_path, map_location=device))
 net_model.eval()
 
 # === MPPI constants ===
-K = 1024
-T = 50
-_lambda = .8
-sigma = 1.0
+K = 2048
+T = 100
+_lambda = 10.0
+sigma = 0.5
 
 nx = 4  # [x, theta, dx, dtheta]
 nu = 1
@@ -39,10 +45,10 @@ nu = 1
 # === Costs (unchanged)===
 def running_cost(x_pos, theta, x_vel, theta_vel, control):
     cart_pos_cost = 1.0 * x_pos**2
-    pole_pos_cost = 100.0 * torch.abs(torch.cos(theta) - 1.0)
+    pole_pos_cost = 50.0 * torch.abs(torch.cos(theta) - 1.0)
     cart_vel_cost = 0.1 * x_vel**2
     pole_vel_cost = 0.1 * theta_vel**2
-    ctrl_cost = 0.01 * control[0]**2
+    ctrl_cost = 0
     return cart_pos_cost + pole_pos_cost + cart_vel_cost + pole_vel_cost + ctrl_cost
 
 def terminal_cost(x_pos, theta, x_vel, theta_vel):
@@ -57,7 +63,7 @@ def rollout_learned_model_batched(net_model, state, U, noise, device):
     # U: (nu, T)
     # noise: (nu, T, K)
     # Returns: costs: (K,)
-
+    print("init state:", state)
     state_dim = state.shape[0]
     nu, T, K = noise.shape
 
@@ -72,15 +78,19 @@ def rollout_learned_model_batched(net_model, state, U, noise, device):
     
     costs = torch.zeros(K, device=device)
 
+    trajs = torch.zeros((K, T, state_dim), device=device)
+    u_traj = torch.zeros((K, T, nu), device=device)
+
     for t in range(T):
         u = U_tensor[:, t].unsqueeze(0).repeat(K, 1) + noise_K_T_nu[:, t, :]  # (K, nu)
-        u = torch.clamp(u, -1.0, 1.0)
+        # u = torch.clamp(u, -1.0, 1.0)
 
         # Prepare batched input (K, state_dim + action_dim)
         x_in = torch.cat([x, u], dim=1)
         
         with torch.no_grad():
-            x_next = net_model(x_in)  # (K, state_dim)
+            delta = net_model(x_in)  # (K, state_dim)
+            x_next = x + delta  # (K, state_dim)
 
         # Cost computation on GPU
         x_pos, theta, x_vel, theta_vel = x_next[:, 0], x_next[:, 1], x_next[:, 2], x_next[:, 3]
@@ -88,10 +98,22 @@ def rollout_learned_model_batched(net_model, state, U, noise, device):
         costs += running_cost(
             x_pos, theta, x_vel, theta_vel, u
         )
+        
+        trajs[:, t, :] = x_next  # Store trajectory
+        u_traj[:, t, :] = u
 
         x = x_next  # Propagate state
 
     x_pos, theta, x_vel, theta_vel = x[:, 0], x[:, 1], x[:, 2], x[:, 3]
+    
+    # # print min abs x_pos and min abs theta
+    # print("min abs x_pos:", torch.min(torch.abs(x_pos)).item())
+    # print("min abs theta:", torch.min(torch.abs(theta)).item())
+
+    # # print traj with min abs theta
+    # print("traj with min abs theta:", trajs[torch.argmin(torch.abs(theta)), :, :].cpu().numpy())
+    # print("u_traj with min abs theta:", u_traj[torch.argmin(torch.abs(theta)), :, :].cpu().numpy())
+    # input()
     costs += 10.0 * running_cost(
         x_pos, theta, x_vel, theta_vel, torch.zeros((K, nu), device=device)
     )
@@ -104,9 +126,10 @@ def mppi_step(net_model, data):
     state = np.concatenate([data.qpos.copy(), data.qvel.copy()])    # shape (4,)
     noise = torch.randn(nu, T, K, device=device) * sigma  # shape (nu, T, K)
 
-    costs = rollout_learned_model_batched(net_model, state, U_global, noise, device)
+    costs = rollout_learned_model_batched(net_model, state, U_global, noise, device) # shape (K,)
 
     beta = torch.min(costs).item()
+    print("beta:", beta)  # Debugging line to check beta value
     weights = torch.exp(-1 / _lambda * (costs - beta))
     weights = weights / torch.sum(weights)
     # weights = weights.cpu().numpy()  # Move weights to CPU for numpy operations
