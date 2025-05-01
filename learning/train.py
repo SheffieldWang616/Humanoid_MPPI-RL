@@ -21,9 +21,9 @@ def pct_l1_loss(output, target):
 
 
 def train_model(device='cuda'):
-    state_csv = "data/2025-04-19_153833/states.csv"
-    action_csv = "data/2025-04-19_153833/actions.csv"
-    ckpt_dir = "checkpoints"
+    state_csv = "data/states_ft"
+    action_csv = "data/actions_ft"
+    ckpt_dir = "checkpoints/state_only_v2"
     os.makedirs(ckpt_dir, exist_ok=True)
 
     # Initialize TensorBoard writer
@@ -47,7 +47,7 @@ def train_model(device='cuda'):
     #                              random_split=dataset_random_split, smooth_window_size=dataset_smooth_window_size)
     train_loader = DataLoader(
         dataset,
-        batch_size=32,
+        batch_size=64,
         shuffle=True,
         num_workers=4,
         pin_memory=True,
@@ -59,7 +59,7 @@ def train_model(device='cuda'):
     #                                   normalize=dataset_normalize, random_split=dataset_random_split, smooth_window_size=dataset_smooth_window_size)
     eval_loader = DataLoader(
         eval_dataset,
-        batch_size=32,
+        batch_size=64,
         shuffle=False,
         num_workers=4,
         pin_memory=True,
@@ -69,20 +69,20 @@ def train_model(device='cuda'):
 
     # model = MLPStatePredictor(state_dim=55, action_dim=21, hidden_dim=512, use_batch_norm=True, dropout_rate=0.2, hidden_layers=6).to(device)
     model = FeatureAttentionStatePredictor(
-        state_dim=55, action_dim=21, hidden_dim=256, num_heads=4, attn_layers=4).to(device)
+        state_dim=len(dataset_idxes), action_dim=21, hidden_dim=512, num_heads=8, attn_layers=7).to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
     num_epochs = 200
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=num_epochs, eta_min=1e-6)
-    model.load_state_dict(torch.load("checkpoints_state_only/model_best.pth"))
+    # model.load_state_dict(torch.load("checkpoints_state_only/model_best.pth"))
     eval_loss_min = float('inf')
     model.train()
     loss_function = torch.nn.MSELoss()
     for epoch in range(num_epochs):
         model.train()
         for batch_idx, (input_features, target) in enumerate(train_loader):
-            input_features = input_features.to(device)
+            input_features = input_features.to(device) 
             target = target.to(device)
             optimizer.zero_grad()
             output = model.forward(input_features)
@@ -158,12 +158,11 @@ def train_model(device='cuda'):
         writer.add_scalar("Eval/Max_Pct_Diff", max_pct_diff, epoch)
         writer.add_scalar("Eval/Loss", loss.item(), epoch)
         
-        diffs = np.array(diffs)
+        diffs = np.vstack(diffs)
         # log each diff to tensorboard, each diff has its own column
         for i in range(diffs.shape[1]):
             writer.add_scalar(f"Diffs/Column_{i}", np.mean(diffs[:, i]), epoch)
             writer.add_scalar(f"Diffs/Max_Column_{i}", np.max(diffs[:, i]), epoch)
-            writer.add_scalar(f"Diffs/Pct_Column_{i}", np.mean(np.abs(diffs[:, i] / input_features[:, i])), epoch)
 
     writer.close()
     print("Training complete.")
