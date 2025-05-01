@@ -10,13 +10,14 @@ from torch.utils.tensorboard import SummaryWriter
 import time
 
 def train_model(device='cuda'):
-    state_csv = "data_cartpole/states"
-    action_csv = "data_cartpole/actions"
-    ckpt_dir = "checkpoints_quadruped"
+    cwd = os.getcwd()
+    state_csv = os.path.join(cwd, "data_quadruped/states")
+    action_csv = os.path.join(cwd,"data_quadruped/actions")
+    ckpt_dir = os.path.join(cwd,"checkpoints_quadruped")
     os.makedirs(ckpt_dir, exist_ok=True)
 
     # Initialize TensorBoard writer
-    log_dir = "runs/quad_train_logs"
+    log_dir = os.path.join(cwd,"runs/quadruped_train_logs")
     time_str = time.strftime("%Y-%m-%d_%H-%M-%S")
     log_dir = os.path.join(log_dir, time_str)
     os.makedirs(log_dir, exist_ok=True)
@@ -51,7 +52,7 @@ def train_model(device='cuda'):
 
     # model = MLPStatePredictor(state_dim=55, action_dim=21, hidden_dim=512, use_batch_norm=True, dropout_rate=0.2, hidden_layers=6).to(device)
     model = FeatureAttentionStatePredictor(
-            state_dim=4, action_dim=1, hidden_dim=64, num_heads=4, attn_layers=2).to(device)
+            state_dim=37, action_dim=12, hidden_dim=64, num_heads=4, attn_layers=2).to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     num_epochs = 50
@@ -108,7 +109,8 @@ def train_model(device='cuda'):
                 output = output.cpu().numpy()
                 input_features = input_features.cpu().numpy()
                 diff = np.abs(output - target)
-                assert diff.shape[1] == 4, "Output shape mismatch, expected 4 columns but target has shape {} and output has shape {}".format(target.shape, output.shape)
+                #assert diff.shape[1] == 4, "Output shape mismatch, expected 4 columns but target has shape {} and output has shape {}".format(target.shape, output.shape)
+                assert diff.shape[1] == target.shape[1], "Output shape mismatch: target shape {}, output shape {}".format(target.shape, output.shape)
                 mean_diff = np.mean(diff)
                 max_diff = np.max(diff)
 
