@@ -123,5 +123,10 @@ function mppi_controller!(m::Model, d::Data)
 end
 
 # woohoooo
+
+# Set initial state: pole downward (θ = π) and cart centered
+data.qpos .= [0.0, π]
+data.qvel .= [0.0, 0.0]
+
 init_visualiser()
 visualise!(model, data; controller=mppi_controller!)
