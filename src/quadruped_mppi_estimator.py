@@ -9,6 +9,7 @@ from learning.model import FeatureAttentionStatePredictor
 
 # Device setup
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
 
 # === Load MuJoCo model ===
 model_path = os.path.join(os.path.dirname(__file__), "scene.xml")
@@ -23,7 +24,7 @@ action_dim = mjc_data.ctrl.size
 net_model = FeatureAttentionStatePredictor(
     state_dim=state_dim,
     action_dim=action_dim,
-    hidden_dim=64,
+    hidden_dim=512,
     num_heads=4,
     attn_layers=2,
     dropout_rate=0.0

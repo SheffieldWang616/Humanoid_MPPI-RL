@@ -52,7 +52,7 @@ def train_model(device='cuda'):
 
     # model = MLPStatePredictor(state_dim=55, action_dim=21, hidden_dim=512, use_batch_norm=True, dropout_rate=0.2, hidden_layers=6).to(device)
     model = FeatureAttentionStatePredictor(
-            state_dim=37, action_dim=12, hidden_dim=64, num_heads=4, attn_layers=2).to(device)
+            state_dim=37, action_dim=12, hidden_dim=512, num_heads=4, attn_layers=2).to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     num_epochs = 50
