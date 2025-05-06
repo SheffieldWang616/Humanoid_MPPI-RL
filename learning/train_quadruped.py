@@ -51,7 +51,6 @@ def train_model(device='cuda'):
     print(f"Train dataset size: {len(dataset)}")
     print(f"Eval dataset size: {len(eval_dataset)}")
 
-    # model = MLPStatePredictor(state_dim=55, action_dim=21, hidden_dim=512, use_batch_norm=True, dropout_rate=0.2, hidden_layers=6).to(device)
     model = FeatureAttentionStatePredictor(
             state_dim=37, action_dim=12, hidden_dim=512, num_heads=4, attn_layers=2).to(device)
 
@@ -59,7 +58,6 @@ def train_model(device='cuda'):
     num_epochs = 50
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=num_epochs, eta_min=1e-6)
-    # model.load_state_dict(torch.load("checkpoints_cartpole/model_best.pth"))
     eval_loss_min = float('inf')
     model.train()
     loss_function = torch.nn.MSELoss()
@@ -117,7 +115,6 @@ def train_model(device='cuda'):
                 output = output.cpu().numpy()
                 input_features = input_features.cpu().numpy()
                 diff = np.abs(output - target)
-                #assert diff.shape[1] == 4, "Output shape mismatch, expected 4 columns but target has shape {} and output has shape {}".format(target.shape, output.shape)
                 assert diff.shape[1] == target.shape[1], "Output shape mismatch: target shape {}, output shape {}".format(target.shape, output.shape)
                 mean_diff = np.mean(diff)
                 max_diff = np.max(diff)
