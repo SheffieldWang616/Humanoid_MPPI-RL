@@ -48,6 +48,7 @@ LOG_STATES = []
 LOG_ACTIONS = []
 LOG_TIMES = []
 
+'''
 def log_data(d, u):
     LOG_TIMES.append(d.time)
     LOG_STATES.append(np.concatenate([d.qpos.copy(), d.qvel.copy()]))
@@ -94,12 +95,298 @@ def cost(qpos, qvel, ctrl):
 
 
     # Encourage front legs to stay in front of back legs
-    '''w_cross = 20000.0
-    leg_crossing_cost = w_cross * (
-        np.maximum(0, RL_x - FL_x)**2 +  # Rear left ahead of front left
-        np.maximum(0, RR_x - FR_x)**2    # Rear right ahead of front right
+    #w_cross = 20000.0
+    #leg_crossing_cost = w_cross * (
+    #    np.maximum(0, RL_x - FL_x)**2 +  # Rear left ahead of front left
+    #    np.maximum(0, RR_x - FR_x)**2    # Rear right ahead of front right
+    #)
+
+    # Costs
+    height_cost = w_height * (current_pos[2] - target_height)**2  # Height tracking
+    vel_cost = w_vel * (current_vel[0] - target_vel_x)**2  # Encourage forward velocity in x
+    ori_cost = w_ori * (current_ori[0]**2 + current_ori[1]**2)  # Orientation tracking (roll, pitch)
+    ang_cost = w_ang * np.sum(current_ang**2)  # Angular velocity cost
+    lateral_cost = w_pos * (current_pos[1]**2 + current_vel[1]**2)  # Penalize lateral movement (y direction)
+    ctrl_cost = w_ctrl * np.sum(ctrl**2)  # Control cost (penalize large control inputs)
+    goal_cost = w_goal * np.sum((current_xy - goal_xy)**2)  # Goal position tracking (2D)
+
+    # Encourage trot gait (symmetry between opposite legs)
+    trot_cost = w_trot * ((FL_calf - RR_calf)**2 + (FR_calf - RL_calf)**2)
+
+    # Front leg cost (encourage movement of front legs)
+    front_hip_cost = -w_front * (ctrl[1]**2 + ctrl[4]**2)  # Encourage movement of front hips
+    front_leg_cost = w_front * (ctrl[2]**2 + ctrl[5]**2)  # Encourage movement of front legs
+
+    # Refined back leg cost (penalize knee bending and encourage symmetry)
+    back_hip_cost = -w_back * (ctrl[7]**2 + ctrl[10]**2)  # Encourage movement of back hips
+    back_leg_cost = w_back * (ctrl[8]**2 + ctrl[11]**2)  # Encourage movement of back legs
+
+    # Penalize excessive knee bending
+    knee_penalty = (
+        (FL_calf - neutral_knee_angle)**2 +
+        (FR_calf - neutral_knee_angle)**2 +
+        (RL_calf - neutral_knee_angle)**2 +
+        (RR_calf - neutral_knee_angle)**2
     )
-    '''
+    knee_cost = w_knee * knee_penalty
+
+    # Optional: discourage extreme joint postures (all joints)
+    posture_cost = w_posture * np.sum(qpos[0:12]**2)
+
+    # Total cost (sum of all components)
+    total_cost = (
+        height_cost + vel_cost + ori_cost + ang_cost +
+        lateral_cost + ctrl_cost + goal_cost +
+        trot_cost + front_leg_cost + back_leg_cost + knee_cost +
+        posture_cost + front_hip_cost + back_hip_cost
+    )
+    
+    w_back_leg_asymmetry = 40000.0
+    back_leg_symmetry_cost = w_back_leg_asymmetry * (RL_calf - RR_calf)**2
+    total_cost += back_leg_symmetry_cost
+    
+    w_front_leg_asymmetry = 30000.0
+    front_leg_symmetry_cost = w_front_leg_asymmetry * (FL_calf - FR_calf)**2
+    total_cost += front_leg_symmetry_cost
+
+    
+    # Set a threshold for extension, e.g., -0.4 radians
+    max_extension = -0.4
+    w_back_extension = 10000.0
+    back_leg_extension_cost = w_back_extension * (
+        np.maximum(0, max_extension - qpos[RL_thigh])**2 +
+        np.maximum(0, max_extension - qpos[RR_thigh])**2
+    )
+    total_cost += back_leg_extension_cost
+    
+    max_extension = 0.4
+    w_front_extension = 20000.0
+    front_leg_extension_cost = w_front_extension * (
+        np.maximum(0, max_extension - qpos[FL_thigh])**2 +
+        np.maximum(0, max_extension - qpos[FR_thigh])**2
+    )
+    total_cost += front_leg_extension_cost
+    
+
+    # **Encourage forward movement by optimizing velocity in the x direction**
+    # You could also reward velocity in the x direction more directly like this:
+    #forward_motion_cost = w_vel * (current_vel[0])**2  # Reward forward movement along x-axis
+    #total_cost += forward_motion_cost
+    
+
+    return total_cost
+'''
+
+def log_data(d, u):
+    LOG_TIMES.append(d.time)
+    LOG_STATES.append(np.concatenate([d.qpos.copy(), d.qvel.copy()]))
+    LOG_ACTIONS.append(u.copy())
+
+'''
+def cost(qpos, qvel, ctrl):
+     global goal_xy
+     # Weights
+     w_pos = 50000.0
+     w_height = 500.0
+     w_vel = 30000.0
+     w_ori = 500.0
+     w_ang = 20.0
+     w_ctrl = 0.1
+     w_goal = 3000.0
+     w_trot = 50000.0#100.0
+     w_front = 44000.0
+     w_back = 470000.0
+     w_knee = 40000.0  # Discourage excessive knee bending
+     w_posture = 5.0  # Discourage extreme joint postures
+     w_back_leg_symmetry = 50.0  # Encourage symmetry between back legs
+ 
+     # Targets
+     target_height = 0.4  # Target height for body
+     target_vel_x = 0.9#0.6  # Target forward velocity (x direction)
+     neutral_knee_angle = 0.5  # Nominal knee angle for neutral stance
+ 
+     # State extraction
+     current_pos = qpos[:3]
+     current_vel = qvel[:3]
+     current_ori = qpos[6:9]
+     current_ang = qvel[6:9]
+     current_xy = qpos[:2]  # Current x, y position
+ 
+     # Leg joints
+     FL_calf = qpos[2]
+     FR_calf = qpos[5]
+     RL_calf = qpos[8]  # Left rear calf
+     RR_calf = qpos[11]  # Right rear calf
+ 
+     # Costs
+     height_cost = w_height * (current_pos[2] - target_height)**2  # Height tracking
+     vel_cost = w_vel * (current_vel[0] - target_vel_x)**2  # Encourage forward velocity in x
+     ori_cost = w_ori * (current_ori[0]**2 + current_ori[1]**2)  # Orientation tracking (roll, pitch)
+     ang_cost = w_ang * np.sum(current_ang**2)  # Angular velocity cost
+     lateral_cost = w_pos * (current_pos[1]**2 + current_vel[1]**2)  # Penalize lateral movement (y direction)
+     ctrl_cost = w_ctrl * np.sum(ctrl**2)  # Control cost (penalize large control inputs)
+     goal_cost = w_goal * np.sum((current_xy - goal_xy)**2)  # Goal position tracking (2D)
+ 
+     # Encourage trot gait (symmetry between opposite legs)
+     trot_cost = w_trot * ((FL_calf - RR_calf)**2 + (FR_calf - RL_calf)**2)
+ 
+     # Front leg cost (encourage movement of front legs)
+     front_hip_cost = -w_front * (ctrl[1]**2 + ctrl[4]**2)  # Encourage movement of front hips
+     front_leg_cost = w_front * (ctrl[2]**2 + ctrl[5]**2)  # Encourage movement of front legs
+ 
+     # Refined back leg cost (penalize knee bending and encourage symmetry)
+     back_hip_cost = -w_back * (ctrl[7]**2 + ctrl[10]**2)  # Encourage movement of back hips
+     back_leg_cost = w_back * (ctrl[8]**2 + ctrl[11]**2)  # Encourage movement of back legs
+ 
+     # Penalize excessive knee bending
+     knee_penalty = (
+         (FL_calf - neutral_knee_angle)**2 +
+         (FR_calf - neutral_knee_angle)**2 +
+         (RL_calf - neutral_knee_angle)**2 +
+         (RR_calf - neutral_knee_angle)**2
+     )
+     knee_cost = w_knee * knee_penalty
+ 
+     # Optional: discourage extreme joint postures (all joints)
+     posture_cost = w_posture * np.sum(qpos[0:12]**2)
+ 
+     # Total cost (sum of all components)
+     total_cost = (
+         height_cost + vel_cost + ori_cost + ang_cost +
+         lateral_cost + ctrl_cost + goal_cost +
+         trot_cost + front_leg_cost + back_leg_cost + knee_cost +
+         posture_cost + front_hip_cost + back_hip_cost
+     )
+ 
+     # **Encourage forward movement by optimizing velocity in the x direction**
+     # You could also reward velocity in the x direction more directly like this:
+     forward_motion_cost = w_vel * (current_vel[0])**2  # Reward forward movement along x-axis
+     total_cost += forward_motion_cost
+ 
+     return total_cost
+'''
+
+def cost(qpos, qvel, ctrl, time):
+    global goal_xy
+
+    # Parameters
+    trot_period = 0.5  # seconds per trot cycle
+    phase = (time % trot_period) / trot_period * 2 * np.pi
+    trot_symmetry = np.sin(phase)
+
+    # Weights (tuned)
+    w_pos = 50000.0 #40000.0
+    w_height = 500.0
+    w_vel = 30000.0
+    w_ori = 500.0
+    w_ang = 20.0
+    w_ctrl = 0.01  # Lower to allow exploration
+    w_goal = 3000.0
+    w_trot = 34000.0
+    w_front = 4400.0#4400.0
+    w_back = 10000.0#10000.0
+    w_knee = 2000.0
+    w_posture = 5.0
+    w_back_leg_symmetry = 50.0
+
+    # Targets
+    target_height = 0.4
+    base_target_vel_x = 0.9
+    osc_amp = 0.1
+    target_vel_x = base_target_vel_x + osc_amp * np.sin(phase)
+    neutral_knee_angle = 0.5
+
+    # State extraction
+    current_pos = qpos[:3]
+    current_vel = qvel[:3]
+    current_ori = qpos[6:9]
+    current_ang = qvel[6:9]
+    current_xy = qpos[:2]
+
+    # Leg joints
+    FL_calf = qpos[2]
+    FR_calf = qpos[5]
+    RL_calf = qpos[8]
+    RR_calf = qpos[11]
+
+    # Base costs
+    height_cost = w_height * (current_pos[2] - target_height)**2
+    vel_cost = w_vel * (current_vel[0] - target_vel_x)**2
+    ori_cost = w_ori * (current_ori[0]**2 + current_ori[1]**2)
+    ang_cost = w_ang * np.sum(current_ang**2)
+    lateral_cost = w_pos * (current_pos[1]**2 + current_vel[1]**2)
+    ctrl_cost = w_ctrl * np.sum(ctrl**2)
+    goal_cost = w_goal * np.sum((current_xy - goal_xy)**2)
+
+    # Gait symmetry (phase-based)
+    FL_RR_phase = (FL_calf - RR_calf) * trot_symmetry
+    FR_RL_phase = (FR_calf - RL_calf) * -trot_symmetry
+    trot_phase_cost = w_trot * (FL_RR_phase**2 + FR_RL_phase**2)
+
+    # Leg-specific movement encouragement
+    front_hip_cost = -w_front * (ctrl[1]**2 + ctrl[4]**2)
+    front_leg_cost = w_front * (ctrl[2]**2 + ctrl[5]**2)
+    back_hip_cost = -w_back * (ctrl[7]**2 + ctrl[10]**2)
+    back_leg_cost = w_back * (ctrl[8]**2 + ctrl[11]**2)
+
+    # Joint posture & symmetry
+    knee_penalty = (
+        (FL_calf - neutral_knee_angle)**2 +
+        (FR_calf - neutral_knee_angle)**2 +
+        (RL_calf - neutral_knee_angle)**2 +
+        (RR_calf - neutral_knee_angle)**2
+    )
+    knee_cost = w_knee * knee_penalty
+    posture_cost = w_posture * np.sum(qpos[0:12]**2)
+
+    # Total cost
+    total_cost = (
+        height_cost + vel_cost + ori_cost + ang_cost +
+        lateral_cost + ctrl_cost + goal_cost +
+        trot_phase_cost + front_leg_cost + back_leg_cost +
+        knee_cost + posture_cost + front_hip_cost + back_hip_cost
+    )
+
+    return total_cost
+
+
+def cost1(qpos, qvel, ctrl):
+    global goal_xy
+    # Weights
+    w_pos = 50000.0# 1000.0
+    w_height = 5000.0
+    w_vel = 24000.0
+    w_ori = 500.0
+    w_ang = 20.0
+    w_ctrl = 0.1
+    w_goal = 20000.0
+    w_trot = 30000.0#30000.0#100.0
+    w_front = 40000.0
+    w_back = 50000.0
+    w_knee = 40000.0  # Discourage excessive knee bending
+    w_posture = 5.0  # Discourage extreme joint postures
+
+    # Targets
+    target_height = 0.36  # Target height for body
+    target_vel_x = 0.9#0.6  # Target forward velocity (x direction)
+    neutral_knee_angle = 0.5  # Nominal knee angle for neutral stance
+
+    # State extraction
+    current_pos = qpos[:3]
+    current_vel = qvel[:3]
+    current_ori = qpos[6:9]
+    current_ang = qvel[6:9]
+    current_xy = qpos[:2]  # Current x, y position
+
+
+    # Leg joints
+    FL_calf = qpos[2]
+    FR_calf = qpos[5]
+    RL_calf = qpos[8]  # Left rear calf
+    RR_calf = qpos[11]  # Right rear calf
+    
+    RL_thigh, RL_calf = 7, 8
+    RR_thigh, RR_calf = 10, 11
 
     # Costs
     height_cost = w_height * (current_pos[2] - target_height)**2  # Height tracking
@@ -189,7 +476,7 @@ def rollout(model, data, U, noise):
             current_ctrl = U[:, t] + noise[:, t, k]
             d_copy.ctrl[:] = np.clip(current_ctrl, model.actuator_ctrlrange[:, 0], model.actuator_ctrlrange[:, 1])
             mujoco.mj_step(model, d_copy)
-            cost_sum += cost(d_copy.qpos, d_copy.qvel, d_copy.ctrl)
+            cost_sum += cost(d_copy.qpos, d_copy.qvel, d_copy.ctrl, d_copy.time)
         costs[k] = cost_sum
 
     threads = []
@@ -309,7 +596,7 @@ def simulate():
     goal_reached = True
     n_runs = 100
     for i in range(n_runs):
-        goal_xy = np.array([0.01 * (i + 200), 0.0])
+        goal_xy = np.array([i + 2.0, 0.0]) #0.01 * (i + 200),
         print(f"\n=== Run {i+1}/{n_runs} | Goal: {goal_xy} ===")
 
         # Reset simulation state
@@ -329,7 +616,7 @@ def simulate():
                 log_data(data, data.ctrl)
                 
                 dist_to_goal = np.linalg.norm(data.qpos[:2] - goal_xy)
-                if (data.qpos[2] < 0.15):
+                if (data.qpos[2] < 0.08):
                     print(f"Robot too low")
                     goal_reached = False
                     break

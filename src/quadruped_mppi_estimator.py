@@ -42,7 +42,7 @@ sigma = 0.4
 U_global = np.zeros((action_dim, T))
 
 # === Goal Position (world frame) ===
-goal_pos = np.array([1.0, 0.0, 0.35])
+goal_pos = np.array([2.0, 0.0, 0.35])
 
 # === Cost Functions ===
 def running_cost(state, control):

@@ -8,6 +8,7 @@ import torch.nn.functional as F
 import os
 from torch.utils.tensorboard import SummaryWriter
 import time
+import matplotlib.pyplot as plt
 
 def train_model(device='cuda'):
     cwd = os.getcwd()
@@ -62,7 +63,12 @@ def train_model(device='cuda'):
     eval_loss_min = float('inf')
     model.train()
     loss_function = torch.nn.MSELoss()
+    
+    train_loss_per_epoch = []
+    eval_loss_per_epoch = []
+
     for epoch in range(num_epochs):
+        train_epoch_loss = 0.0
         model.train()
         for batch_idx, (input_features, target) in enumerate(train_loader):
             input_features = input_features.to(device)
@@ -72,6 +78,7 @@ def train_model(device='cuda'):
             loss = loss_function(output, target)
             loss.backward()
             optimizer.step()
+            train_epoch_loss += loss.item()
 
             # Log the loss to TensorBoard
             global_step = epoch * len(train_loader) + batch_idx
@@ -81,6 +88,7 @@ def train_model(device='cuda'):
                 print(
                     f"Epoch [{epoch+1}/{num_epochs}], Step [{batch_idx}/{len(train_loader)}], Loss: {loss.item():.4f}")
 
+        train_loss_per_epoch.append(train_epoch_loss / len(train_loader))
         if (epoch+1) % 10 == 0:
             # Save the model after each epoch
             model_path = os.path.join(ckpt_dir, f"model_epoch_{epoch+1}.pth")
@@ -126,6 +134,7 @@ def train_model(device='cuda'):
             mean_diff = np.mean(mean_diffs)
             max_diff = np.mean(max_diffs)
             loss = np.mean(losses)
+            eval_loss_per_epoch.append(loss)
             mean_pct_diff = np.mean(mean_pct_diffs)
             max_pct_diff = np.mean(max_pct_diffs)
             if loss < eval_loss_min:
@@ -163,6 +172,23 @@ def train_model(device='cuda'):
         output = model(input_features).to('cpu')
         pct_diff = (output - target) / target
         print(f"Input: {input_features}, Target: {target}, Output: {output}, Pct Diff: {pct_diff}")
+    epochs = np.arange(1, num_epochs + 1)
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(epochs, train_loss_per_epoch, label="Train Loss", marker='o')
+    plt.plot(epochs, eval_loss_per_epoch, label="Eval Loss", marker='s')
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("Training and Evaluation Loss per Epoch")
+    plt.legend()
+    plt.grid(True)
+
+    # Save to file
+    plot_path = os.path.join(log_dir, "loss_plot.png")
+    plt.savefig(plot_path)
+    print(f"Loss plot saved to {plot_path}")
+    plt.close()
+
 
 if __name__ == "__main__":
     train_model()
